@@ -71,6 +71,12 @@ def parse_money(text: str) -> float | None:
         return None
 
 
+def same_value(shown: str, wanted: str) -> bool:
+    """'100 $' == '100', '00:01:00' == '00:01:00' — compara só dígitos e separadores de hora."""
+    norm = lambda s: re.sub(r"[^\d:.,]", "", s).replace(",", ".").rstrip(".")  # noqa: E731
+    return norm(shown) == norm(wanted)
+
+
 def url_account(url: str) -> str | None:
     """Tipo de conta pela URL da Quotex: /demo-trade = DEMO, /trade = REAL, outra página = 'NONE'.
     None quando não é a Quotex (ex.: página falsa dos testes)."""
@@ -188,21 +194,95 @@ class QuotexPage:
         return (await self.current_asset())["name"] == name
 
     async def _set_input(self, label: str, value: str) -> bool:
-        if await self.input_value(label) is None:
+        # popups da Quotex (ex.: a grade de horários que abre ao clicar em "Tempo") ficam por cima
+        # do campo seguinte e bloqueiam o clique: fecha antes e depois
+        await self.page.keyboard.press("Escape")
+        current = await self.input_value(label)
+        if current is None:
             return False
+        if same_value(current, value):
+            return True
         inp = self.page.locator(f'[data-qd-input="{label}"]')
-        await inp.click()
-        await self.page.keyboard.press("Control+A")
+        await inp.click(timeout=5000)
+        # seleciona só o texto DO CAMPO (Ctrl+A fora de um campo seleciona a página inteira)
+        await inp.select_text(timeout=5000)
         await self.page.keyboard.type(value, delay=40)
         await self.page.keyboard.press("Tab")
+        await self.page.keyboard.press("Escape")
+        await self.clear_selection()
         await self.page.wait_for_timeout(300)
-        return True
+        return same_value(await self.input_value(label) or "", value)
+
+    async def clear_selection(self) -> None:
+        await self.page.evaluate("() => window.getSelection()?.removeAllRanges()")
 
     async def set_amount(self, amount: float) -> bool:
         return await self._set_input("Investimento|Investment|Amount", f"{amount:g}")
 
     async def set_duration(self, minutes: int) -> bool:
-        return await self._set_input("Tempo|Time", f"00:{minutes:02d}:00")
+        """O campo Tempo não aceita digitação: clicar nele abre uma grade de botões (00:30, 01:00,
+        05:00…, em MM:SS) e o tempo é escolhido clicando no botão."""
+        label, want = "Tempo|Time", f"00:{minutes:02d}:00"
+        await self.page.keyboard.press("Escape")
+        current = await self.input_value(label)
+        if current is None:
+            return False
+        if re.fullmatch(r"\d{2}:\d{2}", current.strip()):  # está no modo horário: volta ao cronômetro
+            if not await self.toggle_expiry_mode():
+                return False
+            current = await self.input_value(label) or ""
+            if not re.fullmatch(r"\d{2}:\d{2}:\d{2}", current.strip()):
+                return False
+        if same_value(current, want):
+            return True
+        await self.page.locator(f'[data-qd-input="{label}"]').click(timeout=5000)
+        await self.page.wait_for_timeout(500)
+        cell = self.page.locator("[role=grid] *", has_text=re.compile(rf"^\s*{minutes:02d}:00\s*$"))
+        if await cell.count() == 0:
+            await self.page.keyboard.press("Escape")
+            return False
+        await cell.last.click(timeout=5000)  # o mais interno (o próprio botão)
+        await self.page.wait_for_timeout(400)
+        await self.page.keyboard.press("Escape")
+        return same_value(await self.input_value(label) or "", want)
+
+    async def toggle_expiry_mode(self) -> bool:
+        """Botão 'TEMPO DE COMUTAÇÃO': alterna o campo Tempo entre cronômetro e horário."""
+        btn = self.page.locator("button", has_text=re.compile(r"COMUTA|SWITCH TIME", re.I))
+        if await btn.count() == 0:  # página sem <button> (ex.: a falsa dos testes): pelo texto
+            ok = await self._click_text(r"^(TEMPO DE COMUTA\S*O|SWITCH TIME)$")
+        else:
+            await btn.first.click(timeout=5000)
+            ok = True
+        await self.page.wait_for_timeout(600)
+        return ok
+
+    async def set_expiry_at(self, hhmm: str) -> bool:
+        """Modo horário: vencimento numa hora exata (UTC, 'HH:MM', sempre na virada do minuto = fechamento
+        de vela). O botão 'TEMPO DE COMUTAÇÃO' alterna cronômetro ↔ horário; no horário o campo mostra
+        'HH:MM' e a grade lista os horários disponíveis (a Quotex exige ~30 s até o vencimento)."""
+        label = "Tempo|Time"
+        await self.page.keyboard.press("Escape")
+        current = await self.input_value(label)
+        if current is None:
+            return False
+        if re.fullmatch(r"\d{2}:\d{2}:\d{2}", current.strip()):  # está no cronômetro: troca para horário
+            if not await self.toggle_expiry_mode():
+                return False
+            current = await self.input_value(label) or ""
+        if current.strip() == hhmm:
+            return True
+        await self.page.locator(f'[data-qd-input="{label}"]').click(timeout=5000)
+        await self.page.wait_for_timeout(500)
+        cell = self.page.locator("[role=grid] *", has_text=re.compile(rf"^\s*{re.escape(hhmm)}\s*$"))
+        if await cell.count() == 0:
+            await self.page.keyboard.press("Escape")
+            return False
+        await cell.last.click(timeout=5000)
+        await self.page.wait_for_timeout(400)
+        await self.page.keyboard.press("Escape")
+        await self.clear_selection()
+        return (await self.input_value(label) or "").strip() == hhmm
 
     async def click_direction(self, direction: str) -> bool:
         if direction == "CALL":

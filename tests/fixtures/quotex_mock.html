@@ -19,7 +19,11 @@
   </div>
   <div id="right" class="abs">
     <div id="hdr"><span id="hdrName">GBP/USD (OTC)</span> <span id="hdrPct">79%</span></div>
-    <div><div>Tempo</div><input id="tempo" value="00:01:00"></div>
+    <div><div>Tempo</div><input id="tempo" value="00:01:00" readonly></div>
+    <!-- como na Quotex real: o Tempo não aceita digitação; clicar abre uma grade de botões MM:SS -->
+    <div id="tgrid" role="grid" style="display:none"><div><span>00:30</span></div><div><span>01:00</span></div>
+      <div><span>02:00</span></div><div><span>05:00</span></div></div>
+    <span id="toggle" style="display:inline-block;padding:4px">TEMPO DE COMUTAÇÃO</span>
     <div><div>Investimento</div><input id="inv" value="1"></div>
     <button id="buy">Comprar</button>
     <button id="sell">Vender</button>
@@ -35,6 +39,24 @@
     document.getElementById('hdrPct').textContent = pcts[n];
     document.getElementById('modal').style.display = 'none';
   });
+  // modo cronômetro (MM:SS → 00:MM:SS) e modo horário (HH:MM UTC, viradas de minuto a partir de +2 min)
+  let clock = false;
+  const pad = (n) => String(n).padStart(2, '0');
+  const hhmm = (d) => pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes());
+  const fill = () => {
+    const g = document.getElementById('tgrid');
+    const opts = clock ? [2, 3, 4, 5, 6].map(k => hhmm(new Date(Date.now() + k * 60000))) : ['00:30', '01:00', '02:00', '05:00'];
+    g.innerHTML = opts.map(o => '<div><span>' + o + '</span></div>').join('');
+    g.querySelectorAll('span').forEach(b => b.onclick = () => {
+      document.getElementById('tempo').value = clock ? b.textContent.trim() : '00:' + b.textContent.trim();
+      g.style.display = 'none';
+    });
+  };
+  document.getElementById('tempo').onclick = () => { fill(); document.getElementById('tgrid').style.display = 'block'; };
+  document.getElementById('toggle').onclick = () => {
+    clock = !clock;
+    document.getElementById('tempo').value = clock ? hhmm(new Date(Date.now() + 120000)) : '00:01:00';
+  };
   window.orders = [];
   const bal = () => parseFloat(document.getElementById('bal').textContent.replace(/[$,]/g, ''));
   const place = (dir) => {

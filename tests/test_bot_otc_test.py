@@ -58,3 +58,17 @@ def test_report_scores_last_line_and_breakeven(tmp_path):
     assert abs(t["breakeven"] - 1 / 1.85) < 1e-9 and t["proven"] is False
     assert [x["id"] for x in r["trades"]] == ["b", "a"]               # mais recente primeiro
     assert {g["key"] for g in r["by"]["tf"]} == {"M1", "M5"}
+
+
+def test_forward_counts_only_resolved_otc_signals(tmp_path):
+    from backend.otc.report import forward
+
+    rows = [
+        {"id": "1", "asset": "EURNZD_OTC", "setup": "mhi", "tf": 1, "payout": 0.85, "outcome": "win"},
+        {"id": "2", "asset": "EURNZD_OTC", "setup": "mhi", "tf": 1, "payout": 0.85, "outcome": "loss"},
+        {"id": "3", "asset": "ETHUSD", "setup": "mhi", "tf": 1, "payout": 0.85, "outcome": "win"},       # não é OTC
+        {"id": "4", "asset": "CADCHF_OTC", "setup": "sr_rejection", "tf": 1, "payout": 0.85},          # sem resultado
+    ]
+    f = forward(Config(), path=_write(tmp_path, rows))
+    assert (f["total"]["n"], f["total"]["wins"], f["total"]["losses"]) == (2, 1, 1)
+    assert [g["key"] for g in f["by"]["asset"]] == ["EURNZD"]

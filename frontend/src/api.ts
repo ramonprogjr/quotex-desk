@@ -32,6 +32,7 @@ export type TestTrade = {
 };
 export type TestReport = {
   total: TestScore; by: Record<"setup" | "asset" | "tf", (TestScore & { key: string })[]>; trades: TestTrade[];
+  forward: { total: TestScore; by: Record<"setup" | "asset" | "tf", (TestScore & { key: string })[]> };
 };
 export type LabSeg ={ w: number; n: number; rate: number | null; lo?: number; hi?: number };
 export type LabReport = {

@@ -57,6 +57,13 @@ class Config:
     bot_test_max_day: int = 30          # entradas por dia
     bot_test_day_stop: float = 1000.0   # perda máxima por dia (em $ da demo)
     bot_test_min_payout: float = 0.80   # abaixo disso o empate fica alto demais; pula
+    # mapeamento automático: com o robô livre, abre no seletor pares OTC ainda não gravados (maior
+    # payout primeiro) até ter este número gravando. Cada par novo leva ~2 h (120 candles M1) para dar sinal.
+    # vencimento: "horario" = no fechamento exato da vela seguinte à do sinal (o que o backtest testa);
+    # "cronometro" = N minutos contados do clique (termina alguns segundos depois da vela)
+    bot_expiry_mode: str = "horario"
+    bot_otc_autoadd: bool = True
+    bot_otc_max_pairs: int = 12
 
     def signal_ttl(self, tf: int) -> int:
         return int(self.signal_ttl_by_tf.get(str(tf), self.signal_ttl_seconds))

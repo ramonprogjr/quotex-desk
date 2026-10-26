@@ -279,3 +279,5 @@ footer { color: var(--dim); font-size: 10px; text-align: center; padding: 6px; }
 .tr-tabs .on { border-color: var(--up); color: var(--up); }
 .treport table { font-size: 11px; }
 .tr-list { max-height: 320px; display: block; overflow-y: auto; }
+.tr-forward { border-top: 1px solid var(--line); padding-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.tr-forward h4 { margin: 0; font-size: 10px; letter-spacing: 1px; color: var(--dim); font-weight: 400; }

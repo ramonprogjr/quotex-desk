@@ -17,7 +17,7 @@ import shutil
 import socket
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -28,7 +28,7 @@ from playwright.async_api import async_playwright
 from ..assets import ASSETS, is_otc, register_otc
 from ..config import DATA_DIR, load_config
 from ..data import otc_feed
-from ..otc import BOT_TEST_LOG
+from ..otc import BOT_TEST_LOG, TICKS_DIR, latest_instruments
 from .quotex import QuotexPage
 
 API = "http://127.0.0.1:8000"
@@ -111,6 +111,7 @@ class Bot:
         Só age com o robô livre, e no máximo uma vez a cada 5 min por par.
         """
         tried: dict[str, float] = {}
+        failed: dict[str, int] = {}  # mapeamento: falhas no seletor por par
         while True:
             await asyncio.sleep(30)
             try:
@@ -121,7 +122,8 @@ class Bot:
                 for a in [a for a in ASSETS.values() if a.source == "otc"]:
                     age = otc_feed.last_tick_age(a.symbol)
                     # nunca gravado (None) ou parado há mais de 1 dia: não é um par que você abriu hoje
-                    if age is None or age < KEEPALIVE_STALE_S or age > 86400 or t - tried.get(a.key, -1e9) < 300:
+                    if (age is None or age < KEEPALIVE_STALE_S or age > 86400 or t - tried.get(a.key, -1e9) < 300
+                            or failed.get(a.symbol, 0) >= 3):
                         continue
                     if self.busy or not self.queue.empty():
                         break
@@ -131,11 +133,41 @@ class Bot:
                         ok = await self.q.select_asset(a.quotex, otc=True)
                     finally:
                         self.busy = False
+                    failed[a.symbol] = 0 if ok else failed.get(a.symbol, 0) + 1
+                    gave_up = failed[a.symbol] >= 3
                     await self.event(f"gravação: {a.quotex} estava parado há {age / 60:.0f} min — "
-                                     f"{'reaberto no seletor' if ok else 'não consegui reabrir'}", "info" if ok else "error")
+                                     f"{'reaberto no seletor' if ok else 'não consegui reabrir'}"
+                                     f"{' (desisti deste par)' if gave_up else ''}", "info" if ok else "error")
                     await asyncio.sleep(3)
+                await self.map_new_pair(failed)
             except Exception as e:  # noqa: BLE001
                 print(f"[robô] keepalive: {e}", file=sys.stderr)
+
+    async def map_new_pair(self, failed: dict[str, int]) -> None:
+        """Mapeamento automático: abre UM par OTC ainda não gravado (maior payout primeiro) por rodada,
+        até `bot_otc_max_pairs` gravando. Um par que falha 2 vezes no seletor é deixado de lado."""
+        if not self.cfg.bot_otc_autoadd or self.busy or not self.queue.empty():
+            return
+        recording = {d.name for d in TICKS_DIR.iterdir() if d.is_dir()
+                     and (otc_feed.last_tick_age(d.name) or 1e9) < 300} if TICKS_DIR.exists() else set()
+        if len(recording) >= self.cfg.bot_otc_max_pairs:
+            return
+        cands = [r for r in latest_instruments()
+                 if r["symbol"].endswith("_otc") and r.get("open") and r["symbol"] not in recording
+                 and (r.get("payout") or 0) >= self.cfg.bot_test_min_payout * 100 and failed.get(r["symbol"], 0) < 2]
+        if not cands:
+            return
+        r = max(cands, key=lambda x: x["payout"])
+        self.busy = True
+        try:
+            ok = await self.q.select_asset(r["name"], otc=True)
+        finally:
+            self.busy = False
+        if not ok:
+            failed[r["symbol"]] = failed.get(r["symbol"], 0) + 1
+        await self.event(f"mapeando pares: {r['name']} ({r['payout']}%) — "
+                         f"{'aberto, começou a gravar (sinais em ~2 h)' if ok else 'não consegui abrir no seletor'} · "
+                         f"{len(recording) + ok}/{self.cfg.bot_otc_max_pairs} pares gravando", "info" if ok else "error")
 
     def wants_test_otc(self, s: dict) -> bool:
         """Modo teste OTC: sinal (mesmo vetado) de par OTC gravado, com o robô livre."""
@@ -158,10 +190,11 @@ class Bot:
                             await self.event(f"sinal {s['asset']} {s['direction']} expirou antes de executar ({late:.0f}s)", "error")
                     elif s.get("test_otc"):
                         await self.execute(s["asset"], s["direction"], s["tf"], s["expiry"], self.cfg.bot_test_stake,
-                                           s["id"], test_otc=s)
+                                           s["id"], test_otc=s, deadline=s["valid_until"], candle_ts=s.get("candle_ts"))
                     else:
                         await self.execute(s["asset"], s["direction"], s["tf"], s["expiry"], s["stake"], s["id"],
-                                           payout_cfg=s.get("payout"))
+                                           payout_cfg=s.get("payout"), deadline=s["valid_until"],
+                                           candle_ts=s.get("candle_ts"))
             except Exception as e:  # noqa: BLE001
                 await self.event(f"erro executando ordem: {e}", "error")
             finally:
@@ -170,7 +203,8 @@ class Bot:
     # ---------- execução ----------
     async def execute(self, asset: str, direction: str, tf: int, expiry: int, stake: float,
                       signal_id: str | None, payout_cfg: float | None = None, test: bool = False,
-                      test_otc: dict | None = None) -> None:
+                      test_otc: dict | None = None, deadline: str | None = None,
+                      candle_ts: str | None = None) -> None:
         q = self.q
         a = ASSETS.get(asset)
         if not a or (is_otc(a.quotex) and not (test_otc and self.cfg.bot_test_otc)):
@@ -201,11 +235,26 @@ class Bot:
                 return await self.event(f"payout real {cur['payout']:.0%} < {payout_cfg:.0%} usado no sinal — pulei "
                                         "(o painel já foi atualizado)", "error")
 
-        if not await q.set_duration(expiry):
-            return await self.event("não consegui ajustar o campo Tempo (está no modo horário?) — ordem cancelada", "error")
+        expiry_label, target = f"{expiry} min", None
+        if self.cfg.bot_expiry_mode == "horario" and candle_ts:
+            # vence no fechamento da vela que o backtest testa: a seguinte à do sinal (+ expiry - tf)
+            target = datetime.fromisoformat(candle_ts) + timedelta(minutes=tf + expiry)
+            hhmm = target.astimezone(timezone.utc).strftime("%H:%M")
+            if not await q.set_expiry_at(hhmm):
+                return await self.event(f"não consegui marcar o vencimento {hhmm} UTC (modo horário) — ordem cancelada", "error")
+            expiry_label = f"vence {hhmm} UTC"
+        elif not await q.set_duration(expiry):
+            return await self.event("não consegui ajustar o campo Tempo — ordem cancelada", "error")
         if not await q.set_amount(stake):
             return await self.event("não consegui ajustar o campo Investimento — ordem cancelada", "error")
 
+        # o backtest entra na abertura da vela seguinte: preparar a ordem leva segundos, então o prazo do
+        # sinal (10 s no M1, 30 s no M5) é conferido de novo aqui, logo antes do clique
+        if deadline:
+            late = (now() - datetime.fromisoformat(deadline)).total_seconds()
+            if late > GRACE_S:
+                return await self.event(f"{a.quotex} {direction}: passou {late:.0f} s do prazo do sinal enquanto preparava "
+                                        "a ordem — não entrei (a operação já não seria a testada)", "error")
         acc = await q.account()  # confere de novo, logo antes do clique
         if acc["type"] != "DEMO":
             return await self.event("⛔ conta mudou para REAL — ordem cancelada", "error")
@@ -221,7 +270,7 @@ class Bot:
                    "balance_before": bal0, "result": "pending"}
             append_test(rec)
             await self.event(f"✔ ordem DEMO (teste OTC, sem vantagem comprovada): {a.quotex} {direction} "
-                             f"M{tf} {expiry} min · ${stake:g} · {rec['setup']}", "info")
+                             f"M{tf} {expiry_label} · ${stake:g} · {rec['setup']}", "info")
         else:
             r = await self.http.post(f"{API}/api/journal", json={
                 "asset": asset, "direction": direction, "expiry": expiry, "stake": stake, "tf": tf,
@@ -231,7 +280,9 @@ class Bot:
             await self.event(f"✔ ordem DEMO: {a.quotex} {direction} {expiry} min · ${stake:g}"
                              f"{' (teste)' if test else ''}", "info")
 
-        await asyncio.sleep(expiry * 60 + 5)
+        # espera o vencimento (+ alguns segundos para a Quotex creditar o saldo)
+        ends = target if expiry_label.startswith("vence") else now() + timedelta(minutes=expiry)
+        await asyncio.sleep(max(0.0, (ends - now()).total_seconds()) + 4)
         bal1 = (await q.account())["balance"]
         if bal0 is None or bal1 is None:
             if test_otc:

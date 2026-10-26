@@ -62,6 +62,31 @@ export function TestReport() {
         </tbody>
       </table>
 
+      {r.forward.total.n > 0 && (
+        <div className="tr-forward">
+          <h4>FORWARD TEST · TODOS OS SINAIS OTC <span className="hint">(o painel confere cada sinal quando vence, com ou sem entrada do robô)</span></h4>
+          <div className="tr-total">
+            <div><label>SINAIS</label><b>{r.forward.total.n}</b></div>
+            <div><label>WIN</label><b className="up">{r.forward.total.wins}</b></div>
+            <div><label>LOSS</label><b className="down">{r.forward.total.losses}</b></div>
+            <div><label>ACERTO</label><b>{pct(r.forward.total.rate)}</b></div>
+            <div><label>FAIXA (95%)</label><b>{pct(r.forward.total.lo)}–{pct(r.forward.total.hi)}</b></div>
+          </div>
+          <table>
+            <thead><tr><th></th><th>sinais</th><th>W</th><th>L</th><th>acerto</th><th>faixa</th><th>vantagem?</th></tr></thead>
+            <tbody>
+              {r.forward.by[by].map((g) => (
+                <tr key={g.key}>
+                  <td>{g.key}</td><td>{g.n}</td><td className="up">{g.wins}</td><td className="down">{g.losses}</td>
+                  <td>{pct(g.rate)}</td><td className="hint">{g.lo == null ? "—" : `${pct(g.lo)}–${pct(g.hi)}`}</td>
+                  <td className={g.proven ? "up" : "hint"}>{g.proven ? "sim" : "não comprovada"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       <table className="tr-list">
         <thead><tr><th>dia</th><th>hora</th><th>par</th><th></th><th>setup</th><th>dir.</th><th>payout</th><th>resultado</th><th>$</th></tr></thead>
         <tbody>

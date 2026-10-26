@@ -14,3 +14,16 @@ from ..config import DATA_DIR
 OTC_DIR = DATA_DIR / "otc"
 TICKS_DIR = OTC_DIR / "ticks"
 BOT_TEST_LOG = DATA_DIR / "bot_test_otc.jsonl"  # entradas do modo teste OTC do robô (fora do diário)
+
+
+def latest_instruments() -> list[dict]:
+    """Última lista de pares da Quotex gravada: [{symbol, name, type, payout (%), open}]."""
+    import json
+
+    p = OTC_DIR / "instruments.jsonl"
+    try:
+        with open(p, "rb") as f:
+            f.seek(max(0, p.stat().st_size - 200_000))
+            return json.loads(f.read().splitlines()[-1])["rows"]
+    except (OSError, ValueError, IndexError, KeyError):
+        return []

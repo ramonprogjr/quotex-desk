@@ -101,3 +101,33 @@ def test_parse_money_formats():
     assert parse_money("Conta demo $10,000.00") == 10000.0
     assert parse_money("R$ 1.234,56") == 1234.56
     assert parse_money("sem saldo") is None
+
+
+def test_same_value_ignores_currency_and_spaces():
+    from backend.bot.quotex import same_value
+
+    assert same_value("100 $", "100") and same_value("00:01:00", "00:01:00")
+    assert not same_value("1 $", "100") and not same_value("00:05:00", "00:01:00")
+    assert same_value("1,5 $", "1.5") and not same_value("15 $", "1.5")
+
+
+def test_clock_mode_expiry_and_back_to_timer():
+    from datetime import datetime, timedelta, timezone
+
+    from backend.bot.quotex import QuotexPage
+
+    target = (datetime.now(timezone.utc) + timedelta(minutes=3)).strftime("%H:%M")
+
+    async def go(page):
+        q = QuotexPage(page)
+        ok_clock = await q.set_expiry_at(target)              # cronômetro → horário, escolhe HH:MM
+        v_clock = await q.input_value("Tempo|Time")
+        bad = await q.set_expiry_at("99:99")                  # horário inexistente: não marca
+        ok_timer = await q.set_duration(5)                     # horário → cronômetro, 5 min
+        v_timer = await q.input_value("Tempo|Time")
+        return ok_clock, v_clock, bad, ok_timer, v_timer
+
+    ok_clock, v_clock, bad, ok_timer, v_timer = run(go)
+    assert ok_clock and v_clock == target
+    assert bad is False
+    assert ok_timer and v_timer == "00:05:00"

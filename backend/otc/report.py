@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 
-from ..config import Config
+from ..config import DATA_DIR, Config
 from ..stats import breakeven, wilson
 from . import BOT_TEST_LOG
 
@@ -47,6 +47,29 @@ def score(rows: list[dict], z: float) -> dict:
     }
 
 
+def forward(cfg: Config, path=DATA_DIR / "signals.jsonl") -> dict:
+    """Forward test de TODO sinal OTC (o painel resolve cada sinal quando vence, com ou sem entrada do
+    robô): muito mais volume que as entradas do robô, sem atraso de execução."""
+    rows = []
+    if path.exists():
+        for ln in path.read_text(encoding="utf-8").splitlines():
+            try:
+                s = json.loads(ln)
+            except ValueError:
+                continue
+            if s.get("asset", "").endswith("_OTC") and s.get("outcome") in ("win", "loss", "push"):
+                rows.append({"result": s["outcome"], "payout": s.get("payout"), "setup": s.get("setup") or "?",
+                             "asset": s["asset"], "tf": s.get("tf")})
+    by: dict[str, dict[str, list]] = {"setup": defaultdict(list), "asset": defaultdict(list), "tf": defaultdict(list)}
+    for r in rows:
+        by["setup"][r["setup"]].append(r)
+        by["asset"][r["asset"].removesuffix("_OTC")].append(r)
+        by["tf"][f"M{r['tf']}"].append(r)
+    return {"total": score(rows, cfg.z),
+            "by": {g: sorted(({"key": k, **score(v, cfg.z)} for k, v in d.items()), key=lambda x: -x["n"])
+                   for g, d in by.items()}}
+
+
 def report(cfg: Config, path=BOT_TEST_LOG, last: int = 50) -> dict:
     rows = load(path)
     groups: dict[str, dict[str, list]] = {"setup": defaultdict(list), "asset": defaultdict(list), "tf": defaultdict(list)}
@@ -59,4 +82,5 @@ def report(cfg: Config, path=BOT_TEST_LOG, last: int = 50) -> dict:
         "by": {g: sorted(({"key": k, **score(v, cfg.z)} for k, v in d.items()), key=lambda x: -x["n"])
                for g, d in groups.items()},
         "trades": rows[:last],
+        "forward": forward(cfg),
     }
