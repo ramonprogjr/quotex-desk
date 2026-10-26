@@ -25,8 +25,10 @@ import httpx
 import websockets
 from playwright.async_api import async_playwright
 
-from ..assets import ASSETS, is_otc
+from ..assets import ASSETS, is_otc, register_otc
 from ..config import DATA_DIR, load_config
+from ..data import otc_feed
+from ..otc import BOT_TEST_LOG
 from .quotex import QuotexPage
 
 API = "http://127.0.0.1:8000"
@@ -35,7 +37,8 @@ URL = "https://quotex.com/pt/trade"
 PROFILE = DATA_DIR / "quotex_profile"
 CDP_PORT = 9223      # só em 127.0.0.1; dá controle total deste perfil a quem estiver na máquina
 CDP = f"http://127.0.0.1:{CDP_PORT}"
-TEST_LOG = DATA_DIR / "bot_test_otc.jsonl"
+TEST_LOG = BOT_TEST_LOG
+KEEPALIVE_STALE_S = 90  # par OTC gravado sem tick há mais que isso: o robô reabre no seletor
 LOCK_PORT = 9224     # trava de instância única: dois robôs no mesmo Chrome mandariam ordens em dobro
 GRACE_S = 3          # tolerância depois de valid_until
 PAYOUT_TOL = 0.01    # payout real até 1 p.p. abaixo do configurado ainda vale
@@ -99,6 +102,40 @@ class Bot:
             except Exception as e:  # noqa: BLE001
                 print(f"[robô] websocket: {e}; reconectando", file=sys.stderr)
                 await asyncio.sleep(3)
+
+    async def keep_otc_alive(self) -> None:
+        """Reabre no seletor os pares OTC gravados que pararam de receber ticks.
+
+        A Quotex só mantém o preço dos pares já abertos enquanto a conexão da página dura; depois de uma
+        reconexão, só o par da tela continua. Abrir o par de novo (como você faz à mão) volta a gravação.
+        Só age com o robô livre, e no máximo uma vez a cada 5 min por par.
+        """
+        tried: dict[str, float] = {}
+        while True:
+            await asyncio.sleep(30)
+            try:
+                if not self.cfg.bot_test_otc or self.busy or not self.queue.empty():
+                    continue
+                register_otc()
+                t = asyncio.get_running_loop().time()
+                for a in [a for a in ASSETS.values() if a.source == "otc"]:
+                    age = otc_feed.last_tick_age(a.symbol)
+                    # nunca gravado (None) ou parado há mais de 1 dia: não é um par que você abriu hoje
+                    if age is None or age < KEEPALIVE_STALE_S or age > 86400 or t - tried.get(a.key, -1e9) < 300:
+                        continue
+                    if self.busy or not self.queue.empty():
+                        break
+                    tried[a.key] = t
+                    self.busy = True
+                    try:
+                        ok = await self.q.select_asset(a.quotex, otc=True)
+                    finally:
+                        self.busy = False
+                    await self.event(f"gravação: {a.quotex} estava parado há {age / 60:.0f} min — "
+                                     f"{'reaberto no seletor' if ok else 'não consegui reabrir'}", "info" if ok else "error")
+                    await asyncio.sleep(3)
+            except Exception as e:  # noqa: BLE001
+                print(f"[robô] keepalive: {e}", file=sys.stderr)
 
     def wants_test_otc(self, s: dict) -> bool:
         """Modo teste OTC: sinal (mesmo vetado) de par OTC gravado, com o robô livre."""
@@ -313,7 +350,7 @@ async def main() -> None:
         closed = asyncio.Event()
         browser.on("disconnected", lambda *_: closed.set())
         page.on("close", lambda *_: closed.set())
-        tasks = [asyncio.create_task(t) for t in (bot.heartbeat(), bot.listen(), bot.worker())]
+        tasks = [asyncio.create_task(t) for t in (bot.heartbeat(), bot.listen(), bot.worker(), bot.keep_otc_alive())]
         await closed.wait()
         for t in tasks:
             t.cancel()

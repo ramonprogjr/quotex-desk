@@ -13,3 +13,4 @@ from ..config import DATA_DIR
 
 OTC_DIR = DATA_DIR / "otc"
 TICKS_DIR = OTC_DIR / "ticks"
+BOT_TEST_LOG = DATA_DIR / "bot_test_otc.jsonl"  # entradas do modo teste OTC do robô (fora do diário)

@@ -331,6 +331,14 @@ async def bot_test(asset: str, direction: Literal["CALL", "PUT"], tf: int = 5) -
     return {"ok": True}
 
 
+@app.get("/api/bot/test_report")
+def bot_test_report() -> dict:
+    """Placar do modo teste OTC (entradas do robô na DEMO, fora do diário)."""
+    from .otc.report import report
+
+    return report(cfg)
+
+
 @app.post("/api/bot/diagnose")
 async def bot_diagnose() -> dict:
     _bot["diagnose"] = True

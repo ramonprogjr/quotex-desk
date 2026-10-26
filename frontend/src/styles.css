@@ -269,3 +269,13 @@ tr.pending td { background: #12161f; }
 .settings label.dim { opacity: .5; }
 .settings input { width: 90px; }
 footer { color: var(--dim); font-size: 10px; text-align: center; padding: 6px; }
+
+.treport { display: flex; flex-direction: column; gap: 8px; }
+.tr-total { display: flex; gap: 18px; flex-wrap: wrap; }
+.tr-total div { display: flex; flex-direction: column; }
+.tr-total label { font-size: 9px; color: var(--dim); letter-spacing: 1px; }
+.tr-total b { font-size: 18px; }
+.tr-tabs { display: flex; gap: 4px; }
+.tr-tabs .on { border-color: var(--up); color: var(--up); }
+.treport table { font-size: 11px; }
+.tr-list { max-height: 320px; display: block; overflow-y: auto; }

@@ -47,7 +47,9 @@ _INPUT_NEAR_JS = """
     if (!re.test((el.innerText || '').trim()) || el.children.length > 2) continue;
     let p = el;
     for (let i = 0; i < 5 && p; i++, p = p.parentElement) {
-      const inp = p.querySelector('input');
+      // a Quotex tem cópias escondidas/desabilitadas (versão mobile) e um checkbox junto do rótulo
+      const inp = [...p.querySelectorAll('input')].find(
+        (x) => x.offsetParent && !x.disabled && x.type !== 'checkbox' && x.type !== 'hidden');
       if (inp) { document.querySelectorAll('[data-qd-input]').forEach(e => e.removeAttribute('data-qd-input'));
                  inp.setAttribute('data-qd-input', label); return inp.value; }
     }

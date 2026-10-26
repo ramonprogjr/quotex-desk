@@ -39,3 +39,22 @@ def test_wants_test_otc_only_when_enabled_and_otc():
     assert not b.wants_test_otc({"asset": otc, "tf": 1})
     b.enabled, b.busy = True, True
     assert not b.wants_test_otc({"asset": otc, "tf": 1})            # uma operação por vez
+
+
+def test_report_scores_last_line_and_breakeven(tmp_path):
+    from backend.otc.report import report
+
+    rows = [
+        {"id": "a", "at": "2026-10-26T15:00:00+00:00", "asset": "X_OTC", "quotex": "X (OTC)", "tf": 1, "setup": "mhi",
+         "payout": 0.8, "stake": 100, "result": "pending"},
+        {"id": "a", "at": "2026-10-26T15:00:00+00:00", "asset": "X_OTC", "quotex": "X (OTC)", "tf": 1, "setup": "mhi",
+         "payout": 0.8, "stake": 100, "result": "win", "pnl": 80.0},
+        {"id": "b", "at": "2026-10-26T15:02:00+00:00", "asset": "X_OTC", "quotex": "X (OTC)", "tf": 5, "setup": "mhi",
+         "payout": 0.9, "stake": 100, "result": "loss", "pnl": -100.0},
+    ]
+    r = report(Config(), path=_write(tmp_path, rows))
+    t = r["total"]
+    assert (t["n"], t["wins"], t["losses"], t["pnl"]) == (2, 1, 1, -20.0)
+    assert abs(t["breakeven"] - 1 / 1.85) < 1e-9 and t["proven"] is False
+    assert [x["id"] for x in r["trades"]] == ["b", "a"]               # mais recente primeiro
+    assert {g["key"] for g in r["by"]["tf"]} == {"M1", "M5"}

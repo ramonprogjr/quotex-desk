@@ -21,6 +21,18 @@ export type BotState = {
   enabled: boolean; status: string; account: "DEMO" | "REAL" | null; balance: number | null; seen: string | null;
   checks: Record<string, string | null> | null; process: boolean; timeframes: number[];
 };
+export type TestScore = {
+  n: number; wins: number; losses: number; pushes: number; pending: number; unknown: number;
+  rate: number | null; lo: number | null; hi: number | null; payout: number | null; breakeven: number | null;
+  proven: boolean; pnl: number;
+};
+export type TestTrade = {
+  id: string; at: string; asset: string; quotex: string; tf: number; expiry: number; direction: "CALL" | "PUT";
+  stake: number; payout: number | null; setup: string; approved: boolean; result: string; pnl?: number;
+};
+export type TestReport = {
+  total: TestScore; by: Record<"setup" | "asset" | "tf", (TestScore & { key: string })[]>; trades: TestTrade[];
+};
 export type LabSeg ={ w: number; n: number; rate: number | null; lo?: number; hi?: number };
 export type LabReport = {
   asset: string; tf: number; seed: number; status: "running" | "done"; started: string; finished?: string;
@@ -96,6 +108,7 @@ export const api = {
   botTest: (asset: string, direction: "CALL" | "PUT", tf: number) =>
     req(`/api/bot/test?asset=${asset}&direction=${direction}&tf=${tf}`, { method: "POST" }),
   botDiagnose: () => req("/api/bot/diagnose", { method: "POST" }),
+  testReport: () => req<TestReport>("/api/bot/test_report"),
   lab: (a: string, tf: number) => req<{ running: boolean; report: LabReport | null; live: string[] }>(`/api/lab/${a}?tf=${tf}`),
   runLab: (a: string, tf: number, gens: number) => req(`/api/lab/run?asset=${a}&tf=${tf}&gens=${gens}`, { method: "POST" }),
   signals: () => req<Signal[]>("/api/signals?limit=60"),

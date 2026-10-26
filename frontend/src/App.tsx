@@ -10,6 +10,7 @@ import { QuickEntry, SETUP_PT } from "./QuickEntry";
 import { CatalogTable, Specialists } from "./Specialists";
 import { Lab } from "./Lab";
 import { BotPanel } from "./BotPanel";
+import { TestReport } from "./TestReport";
 import type { BotState } from "./api";
 /** "M5 rsi_bb_reversal" → "M5 · RSI + Bollinger (reversão)" */
 const setupLabel = (k: string) => {
@@ -265,6 +266,9 @@ export default function App() {
       </section>
 
       <section className="row r1">
+        <Panel title="TESTE OTC (ROBÔ DEMO)" tag="ENTRADAS AUTOMÁTICAS · SEM VANTAGEM COMPROVADA" wide>
+          <TestReport />
+        </Panel>
         <Panel title="BANCA & VALIDAÇÃO" tag={stats ? `${stats.journal.validation.n}/${stats.journal.validation.target_n} OPS` : ""}>
           <BankPanel state={state} stats={stats} />
         </Panel>
