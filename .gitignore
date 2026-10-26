@@ -1,0 +1,19 @@
+.venv/
+__pycache__/
+.pytest_cache/
+
+# segredos e dados pessoais — NUNCA subir
+.env
+journal.db
+data_cache/
+data_cache/quotex_profile/
+config.json
+*.log
+
+# build e dependências
+frontend/node_modules/
+frontend/dist/
+*.tsbuildinfo
+
+# configurações locais do editor/assistente
+.claude/settings.local.json
